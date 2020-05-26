@@ -10,7 +10,9 @@ import numpy
 #
 # GLOBALS
 vertexDim = 4
-nVertices = 4
+nFaces = 5
+# assume all polys are quads
+nVertices = nFaces * 4
 
 # Global variable to represent the compiled shader program, written in GLSL
 programID = None
@@ -19,35 +21,62 @@ programID = None
 VAO = None
 VBO = None
 
+# Global array to hold VBO data
+VBOData = None
+
 # Global variable for texture
 tex1ID = -1
 
 # create an array to hold positions of our vertices. numpy array is directly transferable to OpenGL
-# order: top-right, bottom-right, bottom-left, top-left
-vertexPositions = numpy.array(
-	[3, 3, 0.0, 1.0,
-	3, -3, 0.0, 1.0,
-	-3, -3, 0.0, 1.0,
-	-3, 3, 0.0, 1.0],
-	dtype='float32'
-)
+# our vertices has ids like below
+#       4---------5
+#       |\       /|
+#       | 2-----3 |
+#       | |     | |
+#       | 0-----1 |
+#       |/       \|
+#       6---------7
+vertexPositions = [
+	[-1.0, -1.0, 0.0, 1.0],
+	[1.0, -1.0, 0.0, 1.0],
+	[-1.0, 1.0, 0.0, 1.0],
+	[1.0, 1.0, 0.0, 1.0],
+	[-2.0, 2.0, -1.0, 1.0],
+	[2.0, 2.0, -1.0, 1.0],
+	[-2.0, -2.0, -1.0, 1.0],
+	[2.0, -2.0, -1.0, 1.0,]
+]
 
-# colors are all white
-vertexColors = numpy.array(
-	[1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0],
-	dtype='float32'
-)
+# we have 5 faces
+# we store indices of the vertices per face
+faces = [
+	[0, 1, 3, 2],
+	[2, 3, 5, 4],
+	[6, 7, 1, 0],
+	[1, 7, 5, 3],
+	[0, 2, 4, 6]
+]
 
-vertexUVs = numpy.array(
-	[1.0, 1.0,
-	1.0, 0.0,
-	0.0, 0.0,
-	0.0, 1.0],
-	dtype='float32'
-)
+# random colors for faces
+faceColors = [
+	[1.0, 0.0, 0.0, 1.0],
+	[0.0, 1.0, 0.0, 1.0],
+	[0.0, 0.0, 1.0, 1.0],
+	[1.0, 1.0, 0.0, 1.0],
+	[0.0, 1.0, 1.0, 1.0]
+]
+
+# faces occupy [0,1] space in u and v and they are unfolded like the projection of the shape into XY plane
+vertexUVs = [
+	[0.33, 0.33],
+	[0.66, 0.33],
+	[0.33, 0.66],
+	[0.66, 0.66],
+	[0.0, 1.0],
+	[1.0, 1.0],
+	[0.0, 0.0],
+	[1.0, 0.0]
+]
 
 # String containing vertex shader program written in GLSL
 strVertexShader = """
@@ -56,9 +85,11 @@ strVertexShader = """
 layout(location = 0) in vec4 vertexPosition;
 layout(location = 1) in vec4 vertexColor;
 layout(location = 2) in vec2 vertexUV;
+layout(location = 3) in vec4 vertexNormal;
 
 out vec4 fragColor;
 out vec2 fragUV;
+out vec3 fragNormal;
 
 uniform mat4 model;
 uniform mat4 view;
@@ -66,9 +97,10 @@ uniform mat4 proj;
 
 void main()
 {
-   gl_Position = proj * view * model * vertexPosition;
-   fragColor = vertexColor;
-   fragUV = vertexUV;
+	gl_Position = proj * view * model * vertexPosition;
+	fragColor = vertexColor;
+	fragUV = vertexUV;
+	fragNormal = normalize( vec3( transpose( inverse(model) ) * vertexNormal ) );
 }
 """
 
@@ -78,20 +110,28 @@ strFragmentShader = """
 
 in vec4 fragColor;
 in vec2 fragUV;
+in vec3 fragNormal;
 
 out vec4 outColor;
+
+uniform vec3 lightDir;
+uniform vec4 lightColor;
+uniform float lightIntensity;
 
 uniform sampler2D tex1;
 
 void main()
 {
-   vec4 texVal = texture(tex1, fragUV);
-   outColor = fragColor * texVal;
+	vec4 texVal = texture(tex1, fragUV);
+
+	// simple lambert diffuse shading model
+	float nDotL = max(dot(fragNormal, lightDir), 0.0);
+	outColor = fragColor * texVal * lightColor * lightIntensity * nDotL;
 }
 """
 
 # camera globals
-camPosition = numpy.array([0.0, 0.0, 10.0, 1.0], dtype='float32')
+camPosition = numpy.array([5.0, 0.0, 10.0, 1.0], dtype='float32')
 camUpAxis = numpy.array([0.0, 1.0, 0.0, 0.0], dtype='float32')
 camNear = 1.0
 camFar = 100.0
@@ -99,7 +139,12 @@ camAspect = 1.0
 camFov = 60.0
 
 # objectPosition
-objectPosition = numpy.array([0, 0, -5, 1.0], dtype='float32')
+objectPosition = numpy.array([0.0, 0.0, 0.0, 1.0], dtype='float32')
+
+# light parameters
+lightDir = numpy.array([0.0, 1.0, 1.0, 0.0], dtype='float32')
+lightColor =  numpy.array([1.0, 1.0, 1.0, 1.0], dtype='float32')
+lightIntensity = 1.0
 
 #
 # FUNCTIONS
@@ -214,8 +259,10 @@ def createShader(shaderType, shaderCode):
 # Initialize the OpenGL environment
 def init():
 	initProgram()
+	initVertexBufferData()
 	initVertexBuffer()
-	initTextures("texture1.png")
+	initTextures("texture3.png")
+	initLightParams()
 
 
 # Set up the list of shaders, and call functions to compile them
@@ -232,10 +279,46 @@ def initProgram():
 		glDeleteShader(shader)
 
 
+def initVertexBufferData():
+	global VBOData
+	global faces
+
+	finalVertexPositions = []
+	finalVertexColors = []
+	finalVertexUvs = []
+	finalVertexNormals = []
+
+	# go over faces and assemble an array for all vertex data
+	faceID = 0
+	for face in faces:
+		# calc a normal for the face
+		# we calc the vectors for two edges of the poly and do a cross product to find the normal
+		#       | 3-----2 |
+		#       | |     | |
+		#       | 0-----1 |
+		# since our indices are given in counter clockwise order, our two edges are:
+		# P1 - P0 and P3 - P0
+		edge1 = numpy.array([a - b for a, b in zip(vertexPositions[face[1]], vertexPositions[face[0]])], dtype='float32')
+		edge2 = numpy.array([a - b for a, b in zip(vertexPositions[face[3]], vertexPositions[face[0]])], dtype='float32')
+		faceNormal = normalize(cross(edge1, edge2))
+
+		# now assemble arrays
+		for vertex in face:
+			finalVertexPositions.extend(vertexPositions[vertex])
+			finalVertexColors.extend(faceColors[faceID])
+			finalVertexUvs.extend(vertexUVs[vertex])
+			finalVertexNormals.extend(faceNormal)
+
+		faceID += 1
+
+	VBOData = numpy.array(finalVertexPositions + finalVertexColors + finalVertexUvs + finalVertexNormals, dtype='float32')
+
+
 # Set up the vertex buffer that will store our vertex coordinates for OpenGL's access
 def initVertexBuffer():
 	global VAO
 	global VBO
+	global VBOData
 
 	VAO = glGenVertexArrays(1)
 	VBO = glGenBuffers(1)
@@ -248,13 +331,12 @@ def initVertexBuffer():
 	glBindBuffer(GL_ARRAY_BUFFER, VBO)
 
 	# set data
-	bufferData = numpy.concatenate((vertexPositions, vertexColors, vertexUVs))
 	elementSize = numpy.dtype(numpy.float32).itemsize
 
 	# third argument is criptic - in c_types if you multiply a data type with an integer you create an array of that type
 	glBufferData(	GL_ARRAY_BUFFER,
-					len(bufferData) * elementSize,
-					bufferData,
+					len(VBOData) * elementSize,
+					VBOData,
 					GL_STATIC_DRAW
 	)
 
@@ -274,6 +356,11 @@ def initVertexBuffer():
 	offset += elementSize * vertexDim * nVertices
 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, elementSize * 2, ctypes.c_void_p(offset))
 	glEnableVertexAttribArray(2)
+
+	# define normals which are passed in location 3 - they start after all positions, colors and uvs and has four floats per vertex
+	offset += elementSize * 2 * nVertices
+	glVertexAttribPointer(3, vertexDim, GL_FLOAT, GL_FALSE, elementSize * vertexDim, ctypes.c_void_p(offset))
+	glEnableVertexAttribArray(3)
 
 	# reset array buffers
 	glBindBuffer(GL_ARRAY_BUFFER, 0)
@@ -324,6 +411,24 @@ def loadTexture(texFilename):
 	glGenerateMipmap(GL_TEXTURE_2D)
 
 	return texID
+
+
+def initLightParams():
+	# we need to bind to the program to set lighting related params
+	global programID
+	glUseProgram(programID)
+
+	# set shader stuff
+	lightDirLocation = glGetUniformLocation(programID, "lightDir")
+	glUniform3f(lightDirLocation, lightDir[0], lightDir[1], lightDir[2])
+	lightColorLocation = glGetUniformLocation(programID, "lightColor")
+	glUniform4f(lightColorLocation, lightColor[0], lightColor[1], lightColor[2], lightColor[3])
+	lightIntensityLocation = glGetUniformLocation(programID, "lightIntensity")
+	glUniform1f(lightIntensityLocation, lightIntensity)
+
+	# reset program
+	glUseProgram(0)
+
 
 # Called to update the display.
 # Because we are using double-buffering, glutSwapBuffers is called at the end

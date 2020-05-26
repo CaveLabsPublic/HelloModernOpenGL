@@ -10,7 +10,9 @@ import numpy
 #
 # GLOBALS
 vertexDim = 4
-nVertices = 4
+nFaces = 5
+# assume all polys are quads
+nVertices = nFaces * 4
 
 # Global variable to represent the compiled shader program, written in GLSL
 programID = None
@@ -19,35 +21,62 @@ programID = None
 VAO = None
 VBO = None
 
+# Global array to hold VBO data
+VBOData = None
+
 # Global variable for texture
 tex1ID = -1
 
 # create an array to hold positions of our vertices. numpy array is directly transferable to OpenGL
-# order: top-right, bottom-right, bottom-left, top-left
-vertexPositions = numpy.array(
-	[3, 3, 0.0, 1.0,
-	3, -3, 0.0, 1.0,
-	-3, -3, 0.0, 1.0,
-	-3, 3, 0.0, 1.0],
-	dtype='float32'
-)
+# our vertices has ids like below
+#       4---------5
+#       |\       /|
+#       | 2-----3 |
+#       | |     | |
+#       | 0-----1 |
+#       |/       \|
+#       6---------7
+vertexPositions = [
+	[-1.0, -1.0, 0.0, 1.0],
+	[1.0, -1.0, 0.0, 1.0],
+	[-1.0, 1.0, 0.0, 1.0],
+	[1.0, 1.0, 0.0, 1.0],
+	[-2.0, 2.0, -1.0, 1.0],
+	[2.0, 2.0, -1.0, 1.0],
+	[-2.0, -2.0, -1.0, 1.0],
+	[2.0, -2.0, -1.0, 1.0,]
+]
 
-# colors are all white
-vertexColors = numpy.array(
-	[1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0,
-	1.0, 1.0, 1.0, 1.0],
-	dtype='float32'
-)
+# we have 5 faces
+# we store indices of the vertices per face
+faces = [
+	[0, 1, 3, 2],
+	[2, 3, 5, 4],
+	[6, 7, 1, 0],
+	[1, 7, 5, 3],
+	[0, 2, 4, 6]
+]
 
-vertexUVs = numpy.array(
-	[1.0, 1.0,
-	1.0, 0.0,
-	0.0, 0.0,
-	0.0, 1.0],
-	dtype='float32'
-)
+# random colors for faces
+faceColors = [
+	[1.0, 0.0, 0.0, 1.0],
+	[0.0, 1.0, 0.0, 1.0],
+	[0.0, 0.0, 1.0, 1.0],
+	[1.0, 1.0, 0.0, 1.0],
+	[0.0, 1.0, 1.0, 1.0]
+]
+
+# faces occupy [0,1] space in u and v and they are unfolded like the projection of the shape into XY plane
+vertexUVs = [
+	[0.33, 0.33],
+	[0.66, 0.33],
+	[0.33, 0.66],
+	[0.66, 0.66],
+	[0.0, 1.0],
+	[1.0, 1.0],
+	[0.0, 0.0],
+	[1.0, 0.0]
+]
 
 # String containing vertex shader program written in GLSL
 strVertexShader = """
@@ -91,7 +120,7 @@ void main()
 """
 
 # camera globals
-camPosition = numpy.array([0.0, 0.0, 10.0, 1.0], dtype='float32')
+camPosition = numpy.array([5.0, 0.0, 10.0, 1.0], dtype='float32')
 camUpAxis = numpy.array([0.0, 1.0, 0.0, 0.0], dtype='float32')
 camNear = 1.0
 camFar = 100.0
@@ -99,7 +128,7 @@ camAspect = 1.0
 camFov = 60.0
 
 # objectPosition
-objectPosition = numpy.array([0, 0, -5, 1.0], dtype='float32')
+objectPosition = numpy.array([0.0, 0.0, 0.0, 1.0], dtype='float32')
 
 #
 # FUNCTIONS
@@ -214,8 +243,9 @@ def createShader(shaderType, shaderCode):
 # Initialize the OpenGL environment
 def init():
 	initProgram()
+	initVertexBufferData()
 	initVertexBuffer()
-	initTextures("texture1.png")
+	initTextures("texture3.png")
 
 
 # Set up the list of shaders, and call functions to compile them
@@ -232,10 +262,32 @@ def initProgram():
 		glDeleteShader(shader)
 
 
+def initVertexBufferData():
+	global VBOData
+	global faces
+
+	finalVertexPositions = []
+	finalVertexColors = []
+	finalVertexUvs = []
+
+	# go over faces and assemble an array for all vertex data
+	faceID = 0
+	for face in faces:
+		for vertex in face:
+			finalVertexPositions.extend(vertexPositions[vertex])
+			finalVertexColors.extend(faceColors[faceID])
+			finalVertexUvs.extend(vertexUVs[vertex])
+
+		faceID += 1
+
+	VBOData = numpy.array(finalVertexPositions + finalVertexColors + finalVertexUvs, dtype='float32')
+
+
 # Set up the vertex buffer that will store our vertex coordinates for OpenGL's access
 def initVertexBuffer():
 	global VAO
 	global VBO
+	global VBOData
 
 	VAO = glGenVertexArrays(1)
 	VBO = glGenBuffers(1)
@@ -248,13 +300,12 @@ def initVertexBuffer():
 	glBindBuffer(GL_ARRAY_BUFFER, VBO)
 
 	# set data
-	bufferData = numpy.concatenate((vertexPositions, vertexColors, vertexUVs))
 	elementSize = numpy.dtype(numpy.float32).itemsize
 
 	# third argument is criptic - in c_types if you multiply a data type with an integer you create an array of that type
 	glBufferData(	GL_ARRAY_BUFFER,
-					len(bufferData) * elementSize,
-					bufferData,
+					len(VBOData) * elementSize,
+					VBOData,
 					GL_STATIC_DRAW
 	)
 

@@ -77,7 +77,7 @@ camAspect = 1.0
 camFov = 60.0
 
 # objectPosition
-objecPosition = numpy.array([0, 0, -5, 1.0], dtype='float32')
+objectPosition = numpy.array([0, 0, -5, 1.0], dtype='float32')
 
 #
 # FUNCTIONS
@@ -122,9 +122,9 @@ def getViewMatrix():
 	camXAxis = cross(camZAxis, camUpAxis)
 	camYAxis = cross(camXAxis, camZAxis)
 
-	rotMat = numpy.array([	camXAxis[0], camXAxis[1], camXAxis[2], 0.0,
-							camYAxis[0], camYAxis[1], camYAxis[2], 0.0,
-							-camZAxis[0], -camZAxis[1], -camZAxis[2], 0.0,
+	rotMat = numpy.array([	camXAxis[0], camYAxis[0], -camZAxis[0], 0.0,
+							camXAxis[1], camYAxis[1], -camZAxis[1], 0.0,
+							camXAxis[2], camYAxis[2], -camZAxis[2], 0.0,
 							0.0, 0.0, 0.0, 1.0], dtype='float32').reshape(4,4)
 
 	traMat = numpy.array([	1.0, 0.0, 0.0, 0.0,
@@ -132,14 +132,14 @@ def getViewMatrix():
 							0.0, 0.0, 1.0, 0.0,
 							-camPosition[0], -camPosition[1], -camPosition[2], 1.0], dtype='float32').reshape(4,4)
 
-	return rotMat.dot(traMat)
+	return traMat.dot(rotMat)
 
 
 def getModelMatrix():
 	return numpy.array([	1.0, 0.0, 0.0, 0.0,
 							0.0, 1.0, 0.0, 0.0,
 							0.0, 0.0, 1.0, 0.0,
-							objecPosition[0], objecPosition[1], objecPosition[2], 1.0], dtype='float32')
+							objectPosition[0], objectPosition[1], objectPosition[2], 1.0], dtype='float32')
 
 
 # Function that accepts a list of shaders, compiles them, and returns a handle to the compiled program
