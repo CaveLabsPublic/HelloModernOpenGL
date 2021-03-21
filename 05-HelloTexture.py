@@ -197,7 +197,7 @@ def createShader(shaderType, shaderCode):
 	if status == GL_FALSE:
 		# Note that getting the error log is much simpler in Python than in C/C++
 		# and does not require explicit handling of the string buffer
-		strInfoLog = glGetShaderInforLog(shaderID)
+		strInfoLog = glGetShaderInfoLog(shaderID)
 		strShaderType = ""
 		if shaderType is GL_VERTEX_SHADER:
 			strShaderType = "vertex"

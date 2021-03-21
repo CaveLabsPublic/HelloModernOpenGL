@@ -125,7 +125,7 @@ void main()
 	vec4 texVal = texture(tex1, fragUV);
 
 	// simple lambert diffuse shading model
-	float nDotL = max(dot(fragNormal, lightDir), 0.0);
+	float nDotL = max(dot(fragNormal, normalize(lightDir)), 0.0);
 	outColor = fragColor * texVal * lightColor * lightIntensity * nDotL;
 }
 """
